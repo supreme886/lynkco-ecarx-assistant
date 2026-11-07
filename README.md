@@ -35,41 +35,17 @@
 
 界面针对车机 1920×1080 @160dpi 手写，全部使用大字号、大触控区。
 
-## 实现原理
+## 界面截图
 
-`CarFunctionController` **全部通过反射**调用 ECARX 的车辆功能接口，因此编译时不需要依赖 `ecarx.adapterapi.jar`：
+![车机助手 v1.6 设置界面](docs/screenshot-v16.png)
 
-```text
-com.ecarx.xui.adaptapi.car.Car.create(context)   -> ICar
-ICar.getICarFunction()                           -> ICarFunction
-ICarFunction.setFunctionValue(id, value)         -> boolean
-ICarFunction.getFunctionValue(id)                -> int
-```
+## 实测环境
 
-调用失败时还有一条兜底路径：`ecarx.mycar.sdkimpl.AdaptapiConnect#getInstance()`。
+- **车型**：2022 款领克 05
+- **车机系统版本**：731
+- 在该环境下，开机自动切换驾驶模式、模式切换后自动关闭智能启停两个功能均验证可用。
 
-### 用到的功能 ID
-
-| 功能 | Function ID | 取值 |
-|---|---|---|
-| 驾驶模式 | `0x22010100` | 见下表 |
-| 智能启停 | `0x20020100` | `1` = 开，`0` = 关 |
-
-| 模式 | 值 |
-|---|---|
-| 经济 ECO | `0x22010101` |
-| 舒适 COMFORT | `0x22010102` |
-| 运动 DYNAMIC | `0x22010103` |
-| 越野 XC | `0x22010104` |
-| 动力 POWER | `0x22010108` |
-| 普通 NORMAL | `0x22010111` |
-| 个性化 CUSTOM | `0x22010140` |
-
-### 一个踩过的坑：写入必须带 zone
-
-写驾驶模式时优先使用**三参数** `setFunctionValue(id, zone=1, value)`（zone=1 指驾驶员区），`zone=2` 兜底，无 zone 的两参数写法只作最后手段。
-
-原因：实测裸两参写入一个配置外的模式，会让车机**模式服务失步 —— 物理按键直接失效，需要重启 `vnsd` 才能恢复**。代码里为此保留了三层降级顺序和失败回滚。
+其他车型、年款或系统版本未经测试，欢迎反馈可用情况。
 
 ## 项目结构
 
@@ -86,9 +62,9 @@ app/src/main/
 └── res/                             图标与字符串
 tools/
 ├── build.sh                         无 Gradle 手工编译链
-├── sign-platform.sh                 平台签名
+├── sign-platform.sh                 平台签名（需自备签名文件）
 └── install.sh                       adb 安装到车机
-keys/                                AOSP test-keys（与本车机 ROM 同套）
+docs/                                截图等说明材料
 ```
 
 ## 构建
@@ -100,7 +76,8 @@ keys/                                AOSP test-keys（与本车机 ROM 同套）
 tools/build.sh
 
 # 2. 用平台签名重新签名（sharedUserId=android.uid.system 必须平台签名才能安装）
-tools/sign-platform.sh
+#    需自备与你车机 ROM 同套签名的 platform.pk8 / platform.x509.pem
+tools/sign-platform.sh <platform.pk8> <platform.x509.pem>
 
 # 3. 安装到车机（默认 192.168.5.1:5555）
 tools/install.sh [车机IP:端口]
@@ -119,7 +96,7 @@ adb -s <车机IP:5555> logcat -s CarAssistant
 
 ## 兼容性与已知限制
 
-- 只适用于使用 **ECARX AdaptAPI** 的领克车机；车型/年款/OTA 版本不同，功能 ID 与模式值可能不同。
+- 已实测环境见上方[实测环境](#实测环境)；理论上适用于其他使用 **ECARX AdaptAPI** 的领克车机，但车型/年款/OTA 版本不同，功能 ID 与模式值可能不同。
 - 依赖**反射调私有 API**，车机系统升级后类名或常量变化会导致功能失效（日志 TAG 统一为 `CarAssistant`，便于排查）。
 - 需要**平台签名**才能工作（`android:sharedUserId="android.uid.system"`）；签名不匹配的 ROM 上装不上，或装上后车辆接口拒绝服务。
 - 实车只验证了四种模式（舒适/经济/运动/个性化），其余取值保留在代码中但未在界面暴露。

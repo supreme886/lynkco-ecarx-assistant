@@ -8,6 +8,9 @@ build/
 *.iml
 local.properties
 
+# 签名材料（不随仓库分发）
+keys/
+
 # 本地工具数据
 .workbuddy/
 
