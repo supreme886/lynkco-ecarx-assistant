@@ -1,0 +1,130 @@
+# 领克车机助手 · LynkCo ECARX Assistant
+
+> 针对**领克（Lynk & Co）车机**（ECARX / 亿咖通 AdaptAPI 平台，Android 9）的驾驶模式与智能启停自动化小工具。
+
+原车有两个让人烦的点：
+
+1. **每次上车都要手动切一次驾驶模式** —— 车机不会记住你上次的选择；
+2. **每次切驾驶模式，智能启停都会被重新打开** —— 于是每次都要再手动关一次。
+
+这个 App 就是为这两件事写的：开机自动切到指定驾驶模式；只要驾驶模式发生变化，就自动把智能启停关掉。
+
+## 功能
+
+### 1. 开机自动切换驾驶模式
+
+- 开机广播触发后拉起后台服务，采用**自适应轮询**等待车辆信号就绪：首次 0.5s，前 15 次每 1s 一次，之后 3s，再之后 15s，最多 55 次（约 2.5 分钟）。
+- 写入前先读当前模式，**已经是目标值就直接跳过**，避免多余写入让车机模式服务失步。
+- 写入后**读回校验**；若写入失败且模式被改成了非预期值，立即**回滚到原模式**并提示。
+- 信号未就绪（读回 -1）时清空连接缓存，下一轮重新连接，而不是空转。
+
+### 2. 模式切换后自动关闭「智能启停」
+
+- 常驻服务通过 `registerFunctionValueWatcher` 监听驾驶模式值变化 —— **无论是物理按键、车机原生设置页还是本 App 改的，都能捕获**。
+- 变化后延迟 1.5 秒关闭智能启停，失败最多补试 3 次（间隔 3 秒）。
+- 关闭后还会在 6s / 15s 各**复查一次**：车辆有时会晚几秒自己把启停重新打开，发现被顶开就再关一次。
+- 开机时**不**主动操作启停，只响应模式切换；开关关闭时服务自动退出。
+
+两个功能在界面上是**完全独立**的两块，互不影响，可以只开其中一个。
+
+### 设置界面
+
+单选四种实车模式（舒适 / 经济 / 运动 / 个性化）+ 两个功能开关 + 「立即切换模式」「立即关闭启停」两个手动按钮，顶部实时回显当前车辆状态（读取失败会自动重试，避免显示无效值）。
+
+界面针对车机 1920×1080 @160dpi 手写，全部使用大字号、大触控区。
+
+## 实现原理
+
+`CarFunctionController` **全部通过反射**调用 ECARX 的车辆功能接口，因此编译时不需要依赖 `ecarx.adapterapi.jar`：
+
+```text
+com.ecarx.xui.adaptapi.car.Car.create(context)   -> ICar
+ICar.getICarFunction()                           -> ICarFunction
+ICarFunction.setFunctionValue(id, value)         -> boolean
+ICarFunction.getFunctionValue(id)                -> int
+```
+
+调用失败时还有一条兜底路径：`ecarx.mycar.sdkimpl.AdaptapiConnect#getInstance()`。
+
+### 用到的功能 ID
+
+| 功能 | Function ID | 取值 |
+|---|---|---|
+| 驾驶模式 | `0x22010100` | 见下表 |
+| 智能启停 | `0x20020100` | `1` = 开，`0` = 关 |
+
+| 模式 | 值 |
+|---|---|
+| 经济 ECO | `0x22010101` |
+| 舒适 COMFORT | `0x22010102` |
+| 运动 DYNAMIC | `0x22010103` |
+| 越野 XC | `0x22010104` |
+| 动力 POWER | `0x22010108` |
+| 普通 NORMAL | `0x22010111` |
+| 个性化 CUSTOM | `0x22010140` |
+
+### 一个踩过的坑：写入必须带 zone
+
+写驾驶模式时优先使用**三参数** `setFunctionValue(id, zone=1, value)`（zone=1 指驾驶员区），`zone=2` 兜底，无 zone 的两参数写法只作最后手段。
+
+原因：实测裸两参写入一个配置外的模式，会让车机**模式服务失步 —— 物理按键直接失效，需要重启 `vnsd` 才能恢复**。代码里为此保留了三层降级顺序和失败回滚。
+
+## 项目结构
+
+```text
+app/src/main/
+├── AndroidManifest.xml              系统签名 + 开机广播 + 两个服务
+├── java/com/car/assistant/
+│   ├── MainActivity.java            设置界面（代码手写 UI）
+│   ├── ApplyService.java            开机自动切模式（自适应轮询）
+│   ├── ModeWatchService.java        常驻监听模式变化 -> 关启停
+│   ├── BootReceiver.java            开机广播入口
+│   ├── CarFunctionController.java   反射调用 ECARX AdaptAPI
+│   └── Prefs.java                   配置持久化（SharedPreferences）
+└── res/                             图标与字符串
+tools/
+├── build.sh                         无 Gradle 手工编译链
+├── sign-platform.sh                 平台签名
+└── install.sh                       adb 安装到车机
+keys/                                AOSP test-keys（与本车机 ROM 同套）
+```
+
+## 构建
+
+本项目**不使用 Gradle**，用手工编译链（需要 Android SDK，默认路径 `~/Library/Android/sdk`、build-tools 37.0.0）：
+
+```bash
+# 1. aapt2 -> javac -> d8 -> apksigner(debug)
+tools/build.sh
+
+# 2. 用平台签名重新签名（sharedUserId=android.uid.system 必须平台签名才能安装）
+tools/sign-platform.sh
+
+# 3. 安装到车机（默认 192.168.5.1:5555）
+tools/install.sh [车机IP:端口]
+```
+
+产物：
+
+- `build/app-debug.apk` —— debug 签名，**只能看界面**，车辆接口会因权限被拒；
+- `build/CarAssistant-platform.apk` —— 平台签名，可正式安装使用。
+
+排查日志：
+
+```bash
+adb -s <车机IP:5555> logcat -s CarAssistant
+```
+
+## 兼容性与已知限制
+
+- 只适用于使用 **ECARX AdaptAPI** 的领克车机；车型/年款/OTA 版本不同，功能 ID 与模式值可能不同。
+- 依赖**反射调私有 API**，车机系统升级后类名或常量变化会导致功能失效（日志 TAG 统一为 `CarAssistant`，便于排查）。
+- 需要**平台签名**才能工作（`android:sharedUserId="android.uid.system"`）；签名不匹配的 ROM 上装不上，或装上后车辆接口拒绝服务。
+- 实车只验证了四种模式（舒适/经济/运动/个性化），其余取值保留在代码中但未在界面暴露。
+- 无自动化测试，改动需真机验证。
+
+## 免责声明
+
+本项目为个人自用工具，与领克（Lynk & Co）、吉利、亿咖通（ECARX）无任何关联，未获其授权或认可。
+
+所有操作均通过车机自身的车辆功能接口完成，但**修改车辆设置存在风险**，请自行评估。使用本工具造成的任何车辆异常、设置丢失或保修问题，由使用者自行承担。请勿在公共道路调试时操作车机。
