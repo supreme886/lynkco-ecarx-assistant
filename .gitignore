@@ -8,5 +8,8 @@ build/
 *.iml
 local.properties
 
+# 本地工具数据
+.workbuddy/
+
 # 系统
 .DS_Store
