@@ -1,0 +1,12 @@
+# 构建产物
+build/
+*.apk
+*.keystore
+
+# IDE
+.idea/
+*.iml
+local.properties
+
+# 系统
+.DS_Store
