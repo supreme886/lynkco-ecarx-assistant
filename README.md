@@ -39,6 +39,19 @@
 
 ![车机助手 v1.6 设置界面](docs/screenshot-v16.png)
 
+## 下载安装
+
+到 [Releases](https://github.com/supreme886/lynkco-ecarx-assistant/releases) 下载 `CarAssistant-v1.6-platform.apk`（已平台签名，无需再签）：
+
+```bash
+adb connect <车机IP>:5555
+adb install -r CarAssistant-v1.6-platform.apk
+```
+
+装好后打开「车机助手」，选择目标模式并打开对应开关即可。当前版本：**v1.6（versionCode 7）**，详细的 APK 功能与限制见 [发布说明](docs/release-notes-v1.6.md)。
+
+> 若安装失败，多半是该 ROM 的平台签名与 AOSP test-keys 不一致，需要用与 ROM 同套的签名文件重新签名，见下方[构建](#构建)。
+
 ## 实测环境
 
 - **车型**：2022 款领克 05
